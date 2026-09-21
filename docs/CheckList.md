@@ -454,3 +454,91 @@ planned entries: 25 (added 20, updated 0, repaired 0)
 **重启 DSH Desktop** 后新代码才生效。重启后在 设置 → 免费模型 点「测速并写入」：
 报告缓存仍在有效期内（360 分钟），会**直接复用**，不会重新测速。
 
+
+---
+
+## M. 第五轮：发布到 DSH 插件市场
+
+用户要求把插件上传到 DSH 插件市场。
+
+### M.1 市场机制（先查清，再动手）
+
+`dshmarket` 本身**不是插件目录**，它每次打开实时请求
+[awesome-dsh-plugin.com/plugins.json](https://awesome-dsh-plugin.com/plugins.json)
+（当前 4053 条），而该目录由精选列表仓库
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+的 CI 每日生成。**收录方式 = 向该仓库提一个 PR，只加一个文件**：
+
+    data/plugins/<owner>__<repo>.yml
+
+条目格式：
+
+    url: https://github.com/owner/repo
+    name: owner/repo
+    category: <枚举值之一>
+    description:
+      en: 一句话，以句号结尾。   # 必填
+      zh: 一句话。              # 可选
+
+### M.2 发布前发现并修正的两个硬性缺口
+
+贡献指南明确写着：**最常见的被拒原因是只声明了 `dsh.client`** —— 那样无法安装。
+我的 `package.json` 正好犯了这个错。
+
+| # | 缺口 | 依据 | 修正 |
+| --- | --- | --- | --- |
+| 10 | `package.json` 只声明 `dsh.client`，没有 `dsh.bundle` | 读 `dsh/lib/plugin-*.js`：`readProfileManifest(dir).dsh?.bundle?.patch !== undefined` 才会被加入 `dsh.profile.bundles`；否则只是一份普通依赖，**永远不激活** | 增加 `"bundle": { "patch": "./cordis.patch.yml" }` |
+| 11 | 仓库根缺少 `cordis.patch.yml` | 贡献指南要求 | 新建，内含 `insert` 条目 |
+
+另外顺手补齐：`LICENSE`（MIT 全文）、`repository`/`homepage`/`bugs`/`files` 元数据，
+并移除 `private: true`。
+
+### M.3 安装路径实测（真实执行，非推断）
+
+```
+$ dsh plugin --profile mkt add github:itongxiaojun/dsh-openrouter-free-models
+dependencies:
++ dsh-openrouter-free-models github:itongxiaojun/dsh-openrouter-free-models
+dsh.profile.bundles:
+  "@deepseek-ai/dsh-base",
+  "dsh-openrouter-free-models"          <- 被识别为 bundle 层
+```
+
+装完后 `node_modules/dsh-openrouter-free-models/lib/` 九个文件齐全，
+`cordis.patch.yml` 就位。**这正是市场安装走的那条路径。**
+
+```bash
+node /tmp/check_installable.mjs
+# dsh.bundle.patch : ./cordis.patch.yml
+# dsh.client       : {"inject":["@deepseek-ai/dsh-client-runtime"],"platform":"web"}
+# private          : (unset - publishable)
+# MANIFEST INSTALLABLE
+```
+
+### M.4 已发布的产物
+
+| 产物 | 地址 | 状态 |
+| --- | --- | --- |
+| 公开仓库 | https://github.com/itongxiaojun/dsh-openrouter-free-models | PUBLIC，2 次提交 |
+| 市场收录 PR | https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/5625 | OPEN / MERGEABLE / +6 行 1 文件 |
+
+条目内容（category 取 `model`，与同类插件 `dsh-openrouter-providers` 一致）：
+
+    url: https://github.com/itongxiaojun/dsh-openrouter-free-models
+    name: itongxiaojun/dsh-openrouter-free-models
+    category: model
+    description:
+      en: "Discovers OpenRouter's free models, measures their real speed and ..."
+      zh: "自动筛选 OpenRouter 免费模型，实测真实速度与上下文大小，…"
+
+### M.5 验证
+
+- [x] `dsh.bundle.patch` 指向的文件存在且用 harness 的 `!!js` dialect 解析通过
+- [x] 真实 `dsh plugin add github:...` 装入干净 profile → 进入 `dsh.profile.bundles`
+- [x] 仓库 PUBLIC 且本地与 origin 同步（`c7cbe24`）
+- [x] PR 为 OPEN / MERGEABLE，仅新增 1 个文件
+- [x] 106 个测试仍全部通过
+- [ ] **待上游合并 PR**（市场每日刷新，通常一天内生效）
+- [ ] **待用户迁移**：本机当前是手工 insert 安装；
+      改用 bundle 安装前必须删掉 profile 那一条同名 insert，否则同 id 冲突
+
