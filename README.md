@@ -45,28 +45,38 @@ grep 'DSH_HOME=' ~/Library/Logs/DSH\ Desktop/harness.log | tail -1
 The profile name is on the `[desktop] profile <name>` line just above. The
 examples below use `$DSH_HOME/profiles/web`.
 
-### Install it as a package, not as a loose file
+### Install
 
 ```bash
-DSH_HOME="$HOME/Library/Application Support/dsh-desktop/harness"
-ln -s "$(pwd)" "$DSH_HOME/profiles/web/node_modules/dsh-openrouter-free-models"
+dsh plugin --profile web add github:itongxiaojun/dsh-openrouter-free-models
 ```
 
-The entry has to be a **bare package name**. The harness discovers a plugin's
-browser half by resolving `exports["./client"]` from the package named in the
-loader entry, and client-modules only recognises entries that are exact package
-specifiers. Pointing the entry at a relative `.mjs` path loads the host half
-and silently drops the Settings section.
+That is the whole install. The package declares `dsh.bundle.patch`, so `dsh`
+adds it to `dsh.profile.bundles` and its `cordis.patch.yml` becomes a profile
+layer — the plugin activates on the next start with no hand-edited entry.
 
-### Register the entry
+Verified:
 
-Append to `$DSH_HOME/profiles/web/cordis.patch.yml`:
-
-```yaml
-- insert:
-    - id: openrouter-free-models
-      name: dsh-openrouter-free-models
 ```
+dependencies:
++ dsh-openrouter-free-models github:itongxiaojun/dsh-openrouter-free-models
+dsh.profile.bundles: ["@deepseek-ai/dsh-base", "dsh-openrouter-free-models"]
+```
+
+It is also listed on the plugin market (设置 → 插件市场), once
+[awesome-dsh-plugin#5625](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/5625)
+is merged — the market serves its catalog from that list.
+
+> **Migrating from a manual install?** If you previously inserted
+> `id: openrouter-free-models` into your profile's own `cordis.patch.yml` by
+> hand, remove that entry first. The bundle patch inserts the same id, and two
+> entries with one id is a conflict.
+>
+> A hand-rolled install also had to be a **bare package name**, because the
+> harness discovers a plugin's browser half by resolving `exports["./client"]`
+> from the package named in the loader entry, and client-modules only
+> recognises exact package specifiers. A relative `.mjs` path loads the host
+> half and silently drops the Settings section.
 
 ### Restart, then confirm
 
