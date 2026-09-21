@@ -1,0 +1,13 @@
+# dsh-openrouter-free-models — bundle patch layer.
+#
+# This file is what makes the package installable as a profile layer:
+# `dsh plugin add` reconciles dsh.profile.bundles and applies the `dsh.bundle.patch`
+# named in package.json, so the plugin activates without a hand-written entry in
+# the profile's own cordis.patch.yml.
+#
+# The id is stable on purpose. If you previously activated this plugin by
+# inserting the same id into your profile patch by hand, remove that entry
+# before installing this bundle — otherwise the same id is inserted twice.
+- insert:
+    - id: openrouter-free-models
+      name: dsh-openrouter-free-models

@@ -1,0 +1,65 @@
+{
+  "name": "dsh-openrouter-free-models",
+  "version": "1.1.0",
+  "description": "DSH plugin: discover OpenRouter free models, measure their real speed and context size, and publish them into the harness OpenRouter model list — fastest first, with speed and context in the display name. Adds a Settings section (设置 → 免费模型).",
+  "type": "module",
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./client": "./lib/client.js",
+    "./core": "./lib/core.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.mjs",
+    "lib/client.js",
+    "lib/core.mjs",
+    "lib/probe.mjs",
+    "lib/apply.mjs",
+    "lib/config.mjs",
+    "lib/bridge.mjs",
+    "lib/or-client.mjs",
+    "lib/cli.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "cli": "node lib/cli.mjs",
+    "list": "node lib/cli.mjs list",
+    "probe": "node lib/cli.mjs probe"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis-plugin",
+    "openrouter",
+    "free-models",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itongxiaojun/dsh-openrouter-free-models.git"
+  },
+  "homepage": "https://github.com/itongxiaojun/dsh-openrouter-free-models#readme",
+  "bugs": {
+    "url": "https://github.com/itongxiaojun/dsh-openrouter-free-models/issues"
+  },
+  "license": "MIT"
+}
