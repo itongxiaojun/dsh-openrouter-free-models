@@ -1,6 +1,6 @@
 {
   "name": "dsh-openrouter-free-models",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "DSH plugin: discover OpenRouter free models, measure their real speed and context size, and publish them into the harness OpenRouter model list — fastest first, with speed and context in the display name. Adds a Settings section (设置 → 免费模型).",
   "type": "module",
   "main": "lib/index.mjs",
