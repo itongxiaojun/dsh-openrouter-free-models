@@ -10,8 +10,10 @@ import { fileURLToPath } from 'node:url'
  * that outlives the plugin is a leak the harness would carry until restart,
  * and it is invisible to any test that only checks "a tool got registered".
  */
-const CORDIS = '/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/cordis/lib/index.js'
-const available = existsSync(CORDIS)
+import { harnessPath } from './harness-path.mjs'
+
+const CORDIS = harnessPath('node_modules/@deepseek-ai/cordis/lib/index.js')
+const available = CORDIS !== undefined
 const PLUGIN = fileURLToPath(new URL('../lib/index.mjs', import.meta.url))
 
 /** Mount the plugin against a stubbed \`tools\` service. */
@@ -35,6 +37,19 @@ async function mount() {
   const plugin = await import(PLUGIN)
   await ctx.plugin(plugin)
   return { ctx, state, plugin }
+}
+
+/** Mount the plugin into an existing context and return the tool it registers. */
+async function mountIntoSibling(ctx) {
+  let registered
+  ctx.plugin({
+    name: 'sibling-tools',
+    apply(c) {
+      c.provide('tools', { register(definition) { registered = definition; return () => {} } })
+    },
+  })
+  await ctx.plugin(await import(PLUGIN))
+  return registered
 }
 
 test('the plugin exports the Cordis plugin surface', { skip: !available && 'cordis is not installed here' }, async () => {
@@ -64,7 +79,7 @@ test('every declared schema passes the harness JSON-Schema validator', { skip: !
   // the whole tool disappear at load, which is exactly how this plugin broke
   // the first time it was installed, so it is asserted rather than assumed.
   const { assertSupportedJsonSchema, assertObjectJsonSchema } =
-    await import('/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh-tools/lib/index.js')
+    await import(harnessPath('node_modules/@deepseek-ai/dsh-tools/lib/index.js'))
   const { state } = await mount()
   const tool = state.registered[0]
   assert.doesNotThrow(() => assertSupportedJsonSchema(tool.parameters))
@@ -84,6 +99,48 @@ test('unloading the plugin disposes its tool registration', { skip: !available &
   assert.equal(state.disposed, 0)
   await ctx.fiber.dispose()
   assert.equal(state.disposed, 1, 'the tool must not outlive the plugin that registered it')
+})
+
+test('the tool reaches a settings service provided by a sibling layer', { skip: !available && 'cordis is not installed here' }, async () => {
+  // Regression: the tool's execute used to rebuild the shared paths bundle
+  // field by field, silently dropping the settings accessor, so every write
+  // failed with "paths.settings is not a function". The settings provider is
+  // also a *sibling* here, which is how the real profile composes it.
+  const { Context } = await import(CORDIS)
+  const { mkdirSync, rmSync, writeFileSync } = await import('node:fs')
+
+  const home = '/tmp/dsh-plugin-settings-path'
+  rmSync(home, { recursive: true, force: true })
+  mkdirSync(home + '/storages', { recursive: true })
+
+  const ctx = new Context()
+  ctx.provide('dshHomePath', (segment) => home + '/' + segment)
+  const writes = []
+  ctx.plugin({
+    name: 'sibling-settings',
+    apply(c) {
+      c.provide('settings', {
+        describe: () => [{ ns: 'llm-pi-ai', revision: 3, value: { providers: { openrouter: { models: [] } } } }],
+        async update(ns, patch, revision) {
+          writes.push({ ns, revision, ids: patch.providers.openrouter.models.map((m) => m.id) })
+        },
+      })
+    },
+  })
+  const tool = await mountIntoSibling(ctx)
+  await new Promise((resolve) => setTimeout(resolve, 40))
+
+  writeFileSync(home + '/storages/openrouter-free-models.backup.json', JSON.stringify({
+    capturedAt: '2026-01-01T00:00:00Z',
+    provider: 'openrouter',
+    models: [{ id: 'restored:free', name: 'Restored' }],
+  }))
+
+  const result = await tool.execute({ action: 'rollback' })
+  assert.equal(result.ok, true, 'the write path must reach the sibling settings service')
+  assert.equal(result.restored, 1)
+  assert.deepEqual(writes, [{ ns: 'llm-pi-ai', revision: 3, ids: ['restored:free'] }])
+  await ctx.fiber.dispose()
 })
 
 test('the plugin mounts without a tools service and disposes cleanly', { skip: !available && 'cordis is not installed here' }, async () => {

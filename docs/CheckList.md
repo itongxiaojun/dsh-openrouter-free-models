@@ -542,3 +542,47 @@ node /tmp/check_installable.mjs
 - [ ] **待用户迁移**：本机当前是手工 insert 安装；
       改用 bundle 安装前必须删掉 profile 那一条同名 insert，否则同 id 冲突
 
+
+---
+
+## N. 第六轮：DSH 0.1.7 升级导致写入失效
+
+用户在设置界面点「测速并写入」得到红字：
+
+    settings service is not available in this deployment
+
+探测与界面都正常（18 个模型、真实速度已显示），只有**写入**失败。
+
+### N.1 根因：框架破坏性变更（0.1.5-rc.2 → 0.1.7-rc.2）
+
+应用被升级了。0.1.7 把 settings 从「命名空间存储」重构成 **SettingsForms**：
+
+| | 0.1.5 | 0.1.7 |
+| --- | --- | --- |
+| 服务类 | `SettingsProvider` | `SettingsForms` |
+| 读 | `get(ns)` | `describe()` → 找 `ns` 取 `value` |
+| 写 | `mutate(ns, ops, rev)` | `update(ns, patch, rev)` |
+| ns 语义 | 命名空间字符串 | **profile 条目 id** |
+| 存储 | `settings.yaml` | profile patch（`settings.yaml` 被改名为 `.imported`） |
+
+**`get()` 在 0.1.7 里根本不存在。** 我的检查 `typeof settings.get !== 'function'`
+因此恒为真，于是每一次写入都返回「服务不可用」——服务其实一直在。
+
+### N.2 已修正
+
+| # | 问题 | 修正 |
+| --- | --- | --- |
+| 12 | 只支持 0.1.5 的 `get/mutate` | `apply.mjs` 新增 `settingsApi()` 探测两条 API，`readEntry`/`writeRoute` 双路实现；0.1.7 只发送 `models` 数组，靠 `mergeLayers` 深合并保留同级 provider 与路由字段 |
+| 13 | `ctx.get('settings')` 取不到服务 | 改用 `ctx.inject(['settings'], cb)` 捕获（与 `dsh-free-search` 同法） |
+| 14 | **`registerTool` 重建 paths 对象时丢掉了 `settings` 字段** | 原样透传 `paths`。这是我最强的 e2e 抓住的：报错是 `paths.settings is not a function` |
+| 15 | 测试硬编码 `Resources/app`，升级后应用搬到 `app.asar.unpacked` → **8 个测试静默跳过** | 新增 `test/harness-path.mjs` 动态定位；跳过比失败更危险，现在 0 跳过 |
+
+### N.3 验证
+
+- [x] **119 通过 / 0 失败 / 0 跳过**（此前 8 个在静默跳过）
+- [x] 真实 0.1.7 `llm-pi-ai` 适配器接受写入结果（volatile 绑定需 `get()` 解包）
+- [x] 真实 Cordis 中，**兄弟层**提供的 settings 服务可写通
+- [x] 工具自身的 `execute` → `paths.settings()` 路径跑通（回归用例）
+- [x] 写出的顺序仍为速度降序，同级 provider 与路由字段保留
+- [ ] **待用户执行：重启 DSH Desktop**，然后在 设置 → 免费模型 点「测速并写入」
+
