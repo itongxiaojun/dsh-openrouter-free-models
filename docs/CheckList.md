@@ -586,3 +586,49 @@ node /tmp/check_installable.mjs
 - [x] 写出的顺序仍为速度降序，同级 provider 与路由字段保留
 - [ ] **待用户执行：重启 DSH Desktop**，然后在 设置 → 免费模型 点「测速并写入」
 
+
+---
+
+## O. 第七轮：目录外的模型需要路由级 api
+
+settings 修好之后，写入仍被 harness 拒绝：
+
+    llm-pi-ai: provider "openrouter" model "stealth/space-bunny-alpha" needs an api;
+    the installed catalog does not describe it, so set the route's api to the
+    wire protocol its endpoint speaks
+
+### O.1 根因
+
+读 0.1.7 适配器源码，`resolveRouteModels()` 里：
+
+    const api = request.api ?? base?.api ?? routeApi;
+    if (api === void 0) invalid(provider, `model "${entry.id}" needs an api; ...`)
+
+`stealth/space-bunny-alpha` 不在随包 pi-ai 目录里（`base` 为 undefined），
+而该路由没有声明 `api`，于是**整份配置**被 `assertServiceable` 拒绝——
+即一个"目录外"的模型会让整次写入失败。
+
+注意 `modelFields` 里**没有 `api`**：协议只能声明在**路由**上，不能按模型声明。
+
+### O.2 修正：由报错驱动的重试
+
+没有猜测"哪些模型不在目录里"（那需要导入 `@earendil-works/pi-ai`，破坏零依赖），
+而是**先按最小写入，被拒后带上 `api` 重试一次**：
+
+- 首次只发送 `models`，因此 harness 本就能解析的路由**绝不会**被我们改成别的协议
+- 仅当错误信息匹配 `needs an api` 且路由自身没有 `api` 时才重试
+- 重试前**重新读取 revision**，避免用过期版本号写入
+- 结果带 `apiAdded`，工具输出会附一条说明
+
+为什么不能无条件设 `api`：`request.api` 的优先级**高于**目录里每个模型自己的协议，
+无条件设置会把所有已知模型一起改掉。
+
+### O.3 验证
+
+- [x] **123 通过 / 0 失败 / 0 跳过**（新增 4 个用例）
+- [x] 「目录外模型 → 重试成功」：首次仅 `models`、重试带 `api: openai-completions`
+- [x] 「路由已自带 `api` → 绝不重试」（不会被悄悄改成我们的协议）
+- [x] 「无关错误 → 原样抛出」，不被重试吞掉
+- [x] 首次成功的写入报告 `apiAdded: false`
+- [ ] **待用户执行：重启 DSH Desktop** 后再次点「测速并写入」
+

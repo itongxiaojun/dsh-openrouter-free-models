@@ -49,6 +49,13 @@ function formsSettings({ models = [], extraProviders = {}, revision = 7, present
   }
 }
 
+/** A 0.1.7-shaped service whose write always fails with a given message. */
+function settingsWithFailingUpdate(message) {
+  const settings = formsSettings({ models: [] })
+  settings.update = async () => { throw new Error(message) }
+  return settings
+}
+
 const REPORT = {
   entries: [
     { id: 'slow:free', name: 'Slow · ⚡10 tok/s · 1K', contextWindow: 1024 },
@@ -164,6 +171,80 @@ test('rollback restores through update() on 0.1.7', async () => {
   assert.equal(result.restored, 1)
   const written = settings.state[SETTINGS_NAMESPACE].providers[PROVIDER_ROUTE].models.map((m) => m.id)
   assert.deepEqual(written, ['restored:free'])
+})
+
+// ── the wire-protocol fallback ─────────────────────────────────────────────
+
+/**
+ * A 0.1.7 service that rejects the first write the way the real adapter does
+ * when a model is missing from the installed pi-ai catalog.
+ */
+function pickySettings({ failTimes = 1 } = {}) {
+  const settings = formsSettings({ models: [] })
+  // The failing scenario is a route with NO declared protocol: that is exactly
+  // when the adapter refuses, and exactly when the fallback applies.
+  delete settings.state[SETTINGS_NAMESPACE].providers[PROVIDER_ROUTE].api
+  const message = 'llm-pi-ai: provider "openrouter" model "stealth/space-bunny-alpha" needs an api; '
+    + "the installed catalog does not describe it, so set the route's api to the wire protocol its endpoint speaks"
+  let failures = 0
+  // Record every attempt, including the rejected one: the whole point is that
+  // the first attempt is refused and the second carries the protocol.
+  settings.attempts = []
+  const originalUpdate = settings.update
+  settings.update = async (ns, patch, revision) => {
+    const route = patch.providers?.[PROVIDER_ROUTE]
+    settings.attempts.push(structuredClone(route))
+    if (route?.api === undefined && failures < failTimes) {
+      failures += 1
+      throw new Error(message)
+    }
+    return originalUpdate(ns, patch, revision)
+  }
+  return settings
+}
+
+test('a model the catalog cannot describe triggers the wire-protocol fallback', async () => {
+  const settings = pickySettings()
+  const result = await applyReport(settings, REPORT, { backup: async () => {} })
+
+  assert.equal(result.ok, true, 'the retry must make the write succeed')
+  assert.equal(result.apiAdded, true)
+  assert.equal(settings.attempts.length, 2, 'one rejected attempt, one retry')
+
+  // The first attempt sent nothing but the array; the retry added the protocol.
+  assert.deepEqual(Object.keys(settings.attempts[0]), ['models'])
+  assert.equal(settings.attempts[1].api, 'openai-completions')
+
+  // And it landed.
+  const route = settings.state[SETTINGS_NAMESPACE].providers[PROVIDER_ROUTE]
+  assert.equal(route.api, 'openai-completions')
+  assert.equal(route.models.length, 2)
+})
+
+test('a successful write reports apiAdded false and never retries', async () => {
+  const settings = pickySettings({ failTimes: 0 })
+  const result = await applyReport(settings, REPORT, { backup: async () => {} })
+  assert.equal(result.ok, true)
+  assert.equal(result.apiAdded, false)
+  assert.equal(settings.calls.update.length, 1)
+})
+
+test('an unrelated write failure is not swallowed by the retry', async () => {
+  const settings = settingsWithFailingUpdate('settings namespace "llm-pi-ai" changed since it was read')
+  await assert.rejects(
+    () => applyReport(settings, REPORT, { backup: async () => {} }),
+    /changed since it was read/,
+  )
+})
+
+test('a route carrying its own api is not quietly rewritten onto ours', async () => {
+  const settings = formsSettings({ models: [] })
+  settings.state[SETTINGS_NAMESPACE].providers[PROVIDER_ROUTE].api = 'anthropic-messages'
+  settings.update = async () => { throw new Error('model "x" needs an api') }
+  await assert.rejects(
+    () => applyReport(settings, REPORT, { backup: async () => {} }),
+    /needs an api/,
+  )
 })
 
 // ── the 0.1.5 path still works ─────────────────────────────────────────────
